@@ -1,0 +1,58 @@
+name: Test WIS2 Meteo-France
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Test DNS and TCP
+        shell: bash
+        run: |
+          set -x
+          getent hosts wis2nc.meteo.fr || true
+          timeout 15 bash -c '</dev/tcp/wis2nc.meteo.fr/443' && echo "TCP 443 OK" || echo "TCP 443 FAIL"
+
+      - name: Test HTTPS
+        shell: bash
+        run: |
+          set -x
+          curl -4 -I -v --connect-timeout 15 --max-time 30 https://wis2nc.meteo.fr/
+
+      - name: Download known ESOH BUFR
+        shell: bash
+        run: |
+          set -x
+          URL='https://wis2nc.meteo.fr/data/2026-09-30/wis/urn:wmo:md:fr-meteofrance:esoh/ISXN20_LFPW_301500.bea2d6d4d88c8ba0b421fe7568f85246_20260930.bin'
+
+          curl -4 -L \
+            --connect-timeout 15 \
+            --max-time 60 \
+            "$URL" \
+            -o france-esoh.bin
+
+          ls -lh france-esoh.bin
+          file france-esoh.bin
+
+          python3 - <<'PY'
+          p="france-esoh.bin"
+          with open(p,"rb") as f:
+              x=f.read()
+
+          print("bytes:", len(x))
+          print("start:", repr(x[:32]))
+          print("BUFR:", x[:4] == b"BUFR")
+          print("BUFR occurrences:", x.count(b"BUFR"))
+          print("7777 occurrences:", x.count(b"7777"))
+
+          if x[:4] != b"BUFR":
+              raise SystemExit("NOT BUFR")
+          PY
+
+      - name: Upload BUFR artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: france-esoh-test
+          path: france-esoh.bin
